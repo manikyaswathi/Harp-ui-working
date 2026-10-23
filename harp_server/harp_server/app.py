@@ -7,13 +7,14 @@ Run with HTTPS:  python3 -m harp_server.serve   (see README for certificates)
 
 import csv
 import io
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from .campaign import ACTIVE_CAMPAIGN_STATUSES, PROFILE_FILE_NAME, CampaignManager, CampaignStore, campaign_view, owner_of
 from .build import MODELS, TRAINING_SETS, BuildManager, build_view, standardize, to_csv
@@ -106,6 +107,12 @@ def create_app(data_dir=None, poll_interval=None, login=TapisGateway.login, star
         manager.stop()
 
     app = FastAPI(title="HARP sweep server", lifespan=lifespan)
+
+    @app.exception_handler(Exception)
+    async def unexpected(request: Request, exc: Exception):
+        # a bug, not a refusal: log the traceback and still tell the page what broke
+        logging.getLogger("harp_server").exception("%s %s failed", request.method, request.url.path)
+        return JSONResponse({"detail": f"HARP server error ({type(exc).__name__}): {exc}"}, status_code=500)
     app.state.manager = manager
     app.state.builds = builds
     manager.tickers.append(builds.tick)

@@ -197,6 +197,12 @@ input:focus,select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 
 
 /* toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--navy-900);color:#fff;padding:13px 22px;border-radius:9px;font-size:14px;font-weight:500;opacity:0;transition:transform .3s,opacity .3s;z-index:50;box-shadow:0 18px 40px -18px rgba(0,0,0,.5);border:1px solid var(--panel-line)}
+.errbox{background:#FBEDED;border:1px solid #E3B4B4;border-left:5px solid #A23A3A;border-radius:10px;padding:16px 44px 16px 18px;margin-bottom:16px;position:relative;color:#5E1F1F}
+.errbox b{display:block;font-size:15px;margin-bottom:6px;color:#A23A3A}
+.errbox p{margin:4px 0;font-size:13.5px;line-height:1.5;word-break:break-word}
+.errbox .hint{color:#6b4a4a}
+.errbox pre{white-space:pre-wrap;font-size:11.5px;background:#fff;border:1px solid #eed;border-radius:6px;padding:8px;max-height:160px;overflow:auto;margin-top:8px}
+.errbox .x{position:absolute;top:8px;right:10px;border:0;background:none;font-size:22px;line-height:1;color:#A23A3A;cursor:pointer}
 .alloc.need{border-color:#A23A3A;box-shadow:0 0 0 3px rgba(162,58,58,.12)}
 .busy{position:fixed;inset:0;background:rgba(248,247,243,.78);backdrop-filter:blur(2px);z-index:55;display:flex;align-items:center;justify-content:center;cursor:progress}
 .busy[hidden]{display:none}
@@ -781,6 +787,10 @@ select:focus,input.ti:focus{outline:none;border-color:var(--teal)}
 
     <!-- 2. REVIEW & SUBMIT ---------------------------------------------- -->
     <div class="panel4" id="p-review" role="tabpanel" aria-labelledby="tab-review" hidden>
+      <div class="errbox" id="submitErr" role="alert" hidden>
+        <button class="x" id="submitErrX" type="button" aria-label="Dismiss">&times;</button>
+        <b id="submitErrTitle"></b><p id="submitErrWhy"></p><p class="hint" id="submitErrHint"></p>
+        <pre id="submitErrRaw" hidden></pre></div>
       <div class="card2">
         <div class="chead"><h3>Plan</h3><span class="am" id="reviewTotals"></span></div>
         <p class="sub">One row per sweep and queue. Each row becomes its own TAPIS jobs.</p>
@@ -997,8 +1007,11 @@ const $ = id => document.getElementById(id);
 async function api(path, opts = {}) {
   const res = await fetch(path, {...opts, headers: {'Content-Type': 'application/json'},
     body: opts.body ? JSON.stringify(opts.body) : undefined});
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.detail || res.statusText), {status: res.status});
+  const raw = await res.text().catch(() => '');
+  let data = {}, json = true;
+  try { data = raw ? JSON.parse(raw) : {}; } catch (e) { json = false; }
+  if (!res.ok) throw Object.assign(new Error(data.detail || `${res.status} ${res.statusText}`.trim()),
+                                   {status: res.status, fromHarp: json && !!data.detail, raw: json ? '' : raw.slice(0, 600)});
   return data;
 }
 function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -1389,7 +1402,7 @@ function busy(title, sub){
 }
 $('submitBtn').addEventListener('click', async () => {
   const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'Submitting…';
-  SUBMITTING = {until: Date.now() + 45000, last: null, same: 0};
+  SUBMITTING = {until: Date.now() + 45000, last: null, same: 0}; $('submitErr').hidden = true;
   busy('Submitting to TAPIS…', 'Creating each sweep\'s results folder. Please stay on this page.');
   store.set('harp-launch', {storeSys: $('storeSys').value, store: $('store').value.trim(),
                             moveSys: $('moveSys').value, movePath: $('movePath').value.trim()});
@@ -1401,7 +1414,8 @@ $('submitBtn').addEventListener('click', async () => {
   } catch (e) {
     const why = e.status === 401 ? 'Your session expired. Log in again, then submit.' : e.message;
     busy(null);
-    toast('Submit failed. Nothing was sent to TAPIS; see the message under the button.');
+    showSubmitError(e, why);
+    toast('Submit failed. The reason is in the red box at the top.');
     btn.textContent = 'Submit plan'; reviewReady(); msg.textContent = 'Not submitted: ' + why;
     return;
   }
@@ -1415,6 +1429,31 @@ $('submitBtn').addEventListener('click', async () => {
   DONE = made; watchSubmitted.warned = false; watchSubmitted();
   refreshBadge(); loadApps().then(renderApps).catch(() => {});
 });
+
+/* A failed submit: say what failed, what it means, and whether the sweep reached TAPIS anyway. */
+async function showSubmitError(e, why){
+  const box = $('submitErr'), at = new Date().toLocaleTimeString();
+  $('submitErrTitle').textContent = `Submit failed at ${at}` + (e.status ? ` (HTTP ${e.status})` : '');
+  $('submitErrWhy').textContent = why;
+  $('submitErrHint').textContent =
+      e.status === 401 ? 'Your TAPIS session ended. Log in again with a fresh token, then submit again.'
+    : e.fromHarp && e.status !== 500 ? 'TAPIS or HARP refused the plan for the reason above. Fix it and submit again; nothing else was sent.'
+    : !e.status ? 'The browser could not reach the HARP server. Check that the server is running and the page link is current.'
+    : e.status === 500 && e.fromHarp ? 'This is a bug in the HARP server, not a TAPIS refusal. The server\'s terminal has the full traceback; send it to the developers.'
+    : 'This reply did not come from HARP: the server did not answer (it may have crashed or restarted, or the request '
+      + 'took too long for the proxy in front of it, e.g. the Codespace port link). The server\'s terminal shows the real error.';
+  $('submitErrRaw').hidden = !e.raw; $('submitErrRaw').textContent = e.raw || '';
+  box.hidden = false; box.scrollIntoView({behavior: 'smooth', block: 'start'});
+  if ((!e.fromHarp || e.status === 500) && e.status !== 401) {      // the server may have created the sweep before the reply was lost
+    try {
+      const before = new Set(DONE.map(c => c.id)), recent = (await api('/api/campaigns'))
+        .filter(c => !before.has(c.id) && Date.now() - new Date(c.created_at) < 10 * 60000);
+      if (recent.length) $('submitErrHint').textContent += ` The server did create ${recent.length} sweep${recent.length === 1 ? '' : 's'} in the last `
+        + `10 minutes (${recent.map(c => c.name).join(', ')}): check the Jobs tab before submitting again, or you will run them twice.`;
+    } catch (_) {}
+  }
+}
+$('submitErrX').addEventListener('click', () => { $('submitErr').hidden = true; });
 
 /* After a submit: each job of the new sweeps with its TAPIS job id as soon as TAPIS gives one. */
 let DONE = [], doneTimer = null;
