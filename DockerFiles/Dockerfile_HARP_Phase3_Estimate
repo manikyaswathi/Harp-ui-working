@@ -1,0 +1,15 @@
+# HARP phase 3: estimate runtimes (and the max minutes to ask for) with the models phase 2 trained.
+#   docker build -f DockerFiles/Dockerfile_HARP_Phase3_Estimate -t <hub>/harp-estimate:1.0.0 .
+# Run on phase 2's output folder, like TAPIS does with /TapisInput and /TapisOutput:
+#   docker run --rm -v $PWD/out:/TapisInput:ro -v $PWD/estimates:/TapisOutput <hub>/harp-estimate:1.0.0 \
+#       '{"requests": [{"params": {"epochs": 4}, "system_id": "ascend-tapis", "queue": "debug", "cores": 8}]}'
+# Uses the same pinned versions as phase 2, which saved the models. See job_runner/README_phase2_phase3.md.
+
+FROM python:3.11-slim
+
+COPY job_runner/requirements-model.txt /opt/harp/requirements-model.txt
+RUN pip3 install --no-cache-dir -r /opt/harp/requirements-model.txt
+
+COPY job_runner/harp_modeling.py job_runner/harp_train_runner.py job_runner/harp_estimate_runner.py /opt/harp/
+
+ENTRYPOINT ["python3", "/opt/harp/harp_estimate_runner.py"]

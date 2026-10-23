@@ -1,0 +1,6 @@
+# HARP phase 2 (train) and phase 3 (estimate). Both images must pin the same versions:
+# phase 3 loads the models phase 2 saved, and scikit-learn models only load in the version that saved them.
+numpy==2.1.3
+pandas==2.2.3
+scikit-learn==1.5.2
+joblib==1.4.2

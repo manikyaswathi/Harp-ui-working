@@ -1,0 +1,15 @@
+# HARP phase 2: clean the accumulated phase-1 results and train the runtime estimators picked in the UI.
+#   docker build -f DockerFiles/Dockerfile_HARP_Phase2_Train -t <hub>/harp-train:1.0.0 .
+# Run on a results folder (or zips of it), like TAPIS does with /TapisInput and /TapisOutput:
+#   docker run --rm -v $PWD/harp_runs:/TapisInput:ro -v $PWD/out:/TapisOutput <hub>/harp-train:1.0.0 \
+#       '{"models": ["LR", "NN", "DTR"], "training_sets": ["SD", "SD+25FS"]}'
+# See job_runner/README_phase2_phase3.md.
+
+FROM python:3.11-slim
+
+COPY job_runner/requirements-model.txt /opt/harp/requirements-model.txt
+RUN pip3 install --no-cache-dir -r /opt/harp/requirements-model.txt
+
+COPY job_runner/harp_modeling.py job_runner/harp_train_runner.py /opt/harp/
+
+ENTRYPOINT ["python3", "/opt/harp/harp_train_runner.py"]
