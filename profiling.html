@@ -197,6 +197,14 @@ input:focus,select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 
 
 /* toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--navy-900);color:#fff;padding:13px 22px;border-radius:9px;font-size:14px;font-weight:500;opacity:0;transition:transform .3s,opacity .3s;z-index:50;box-shadow:0 18px 40px -18px rgba(0,0,0,.5);border:1px solid var(--panel-line)}
+.alloc.need{border-color:#A23A3A;box-shadow:0 0 0 3px rgba(162,58,58,.12)}
+.busy{position:fixed;inset:0;background:rgba(248,247,243,.78);backdrop-filter:blur(2px);z-index:55;display:flex;align-items:center;justify-content:center;cursor:progress}
+.busy[hidden]{display:none}
+.busy .box{background:#fff;border:1px solid var(--line,#e5e2da);border-radius:12px;padding:22px 28px;box-shadow:0 18px 40px -18px rgba(0,0,0,.35);text-align:center;max-width:420px}
+.busy .spin{width:26px;height:26px;border:3px solid #d9e6ea;border-top-color:#2E8FA6;border-radius:50%;margin:0 auto 12px;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.busy b{display:block;font-size:15px;margin-bottom:4px}
+.busy span{font-size:13px;color:var(--muted)}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 
 /* footer */
@@ -968,6 +976,8 @@ select:focus,input.ti:focus{outline:none;border-color:var(--teal)}
   </div>
 </div></section>
 <div class="toast" id="toast" role="status"></div>
+<div class="busy" id="busy" hidden role="alertdialog" aria-modal="true" aria-labelledby="busyTitle">
+  <div class="box"><div class="spin"></div><b id="busyTitle"></b><span id="busySub"></span></div></div>
 <script>
 /* Profiling, on one page:
      1 Configure  - pick an app, set up a sweep, tick systems/queues, add it to the plan
@@ -1095,6 +1105,8 @@ function sweepProblem(a, sw){
   }
   if (!(sw.reps >= 1) || !(sw.timeout >= 1)) return 'Repetitions and timeout must be at least 1.';
   if (!sw.queues.length) return 'Tick at least one queue.';
+  const noAcct = [...new Set(sw.queues.map(k => k.split('|')[0]))].filter(id => !(ALLOC[id] || '').trim());
+  if (noAcct.length) return `Enter the account (allocation, e.g. -A PAS2271) for ${noAcct.join(', ')} before adding to the plan.`;
   for (const k of sw.queues) { const q = qOf(k), seen = new Set();
     for (const c of cfgsOf(sw, k)) { const t = cfgText(q, c, sw); if (seen.has(t)) return `${k.replace('|', ' / ')} has two identical configurations.`; seen.add(t); } }
   return '';
@@ -1191,7 +1203,7 @@ function renderSystems(){
       </div>`; }).join('')}`).join('');
   const sys = $('systems');
   sys.querySelectorAll('.alloc').forEach(el => el.addEventListener('input', () => {
-    ALLOC[el.dataset.sys] = el.value.trim(); store.set('harp-alloc', ALLOC); }));
+    ALLOC[el.dataset.sys] = el.value.trim(); store.set('harp-alloc', ALLOC); updateCurrent(); }));
   sys.querySelectorAll('.qpick').forEach(el => el.addEventListener('change', () => {
     const k = el.dataset.k;
     SW.queues = el.checked ? [...new Set([...SW.queues, k])] : SW.queues.filter(x => x !== k);
@@ -1238,6 +1250,9 @@ function updateCurrent(){
       + ` &times; <b>${q}</b> configuration${q === 1 ? '' : 's'} &times; <b>${SW.reps}</b> rep${SW.reps === 1 ? '' : 's'}`;
   const prob = sweepProblem(app, SW);
   $('swErr').textContent = prob && prob !== 'Tick at least one queue.' ? prob : '';
+  const picked = new Set(SW.queues.map(k => k.split('|')[0]));   // mark the account boxes still to fill in
+  document.querySelectorAll('#systems .alloc').forEach(el =>
+    el.classList.toggle('need', picked.has(el.dataset.sys) && !(ALLOC[el.dataset.sys] || '').trim()));
   $('addBtn').disabled = !!prob; $('addMsg').className = 'launchmsg'; $('addMsg').textContent = prob;
 }
 ['swName', 'swType', 'swReps', 'swTimeout'].forEach(id => $(id).addEventListener('input', () => {
@@ -1349,19 +1364,33 @@ async function renderReview(){
   } catch (e) { $('reviewErr').textContent = 'Could not check the plan: ' + e.message; }
   reviewReady();
 }
+const planNoAcct = () => [...new Set(PLAN.flatMap(p => p.sweep.queues.map(k => k.split('|')[0])))]
+  .filter(id => !(ALLOC[id] || '').trim());
 function reviewReady(){
   const path = $('store').value.trim();
   const prob = !PLAN.length ? 'The plan is empty.' : !path ? 'Choose a results folder.'
     : !path.startsWith('/') ? 'The results folder must be an absolute path, starting with /.'
     : $('moveSys').value && !$('movePath').value.trim().startsWith('/') ? 'Give the copy location an absolute folder, or choose "Don\'t copy".'
+    : planNoAcct().length ? `Enter the account for ${planNoAcct().join(', ')} on Configure.`
     : !CHECK ? 'Checking the plan…' : CHECK.some(r => !r.ok) ? 'Fix the sweeps marked “fix”.'
     : !$('confirm').checked ? 'Tick the box to confirm.' : '';
   $('submitBtn').disabled = !!prob; $('submitMsg').textContent = prob;
 }
 ['store', 'storeSys', 'moveSys', 'movePath'].forEach(id => $(id).addEventListener('input', reviewReady));
 $('confirm').addEventListener('change', reviewReady);
+/* While a plan is being submitted the page is locked: no tab changes, no second submit, no leaving. */
+let SUBMITTING = null;
+const leaveGuard = e => { e.preventDefault(); e.returnValue = ''; };
+function busy(title, sub){
+  const on = !!title; $('busy').hidden = !on;
+  if (on) { $('busyTitle').textContent = title; $('busySub').textContent = sub || ''; }
+  if (on) window.addEventListener('beforeunload', leaveGuard); else window.removeEventListener('beforeunload', leaveGuard);
+  if (!on) SUBMITTING = null;
+}
 $('submitBtn').addEventListener('click', async () => {
   const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'Submitting…';
+  SUBMITTING = {until: Date.now() + 45000, last: null, same: 0};
+  busy('Submitting to TAPIS…', 'Creating each sweep\'s results folder. Please stay on this page.');
   store.set('harp-launch', {storeSys: $('storeSys').value, store: $('store').value.trim(),
                             moveSys: $('moveSys').value, movePath: $('movePath').value.trim()});
   const msg = $('submitMsg');
@@ -1371,6 +1400,7 @@ $('submitBtn').addEventListener('click', async () => {
     made = await api('/api/plan/submit', {method: 'POST', body: planBody()});
   } catch (e) {
     const why = e.status === 401 ? 'Your session expired. Log in again, then submit.' : e.message;
+    busy(null);
     toast('Submit failed. Nothing was sent to TAPIS; see the message under the button.');
     btn.textContent = 'Submit plan'; reviewReady(); msg.textContent = 'Not submitted: ' + why;
     return;
@@ -1381,6 +1411,7 @@ $('submitBtn').addEventListener('click', async () => {
   btn.textContent = 'Submit plan'; reviewReady();
   $('doneTitle').textContent = `Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}`;
   toast(`Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}. Sending the jobs to TAPIS…`);
+  busy('Sending the jobs to TAPIS…', 'Waiting for TAPIS job ids. Please stay on this page.');
   DONE = made; watchSubmitted.warned = false; watchSubmitted();
   refreshBadge(); loadApps().then(renderApps).catch(() => {});
 });
@@ -1391,7 +1422,9 @@ async function watchSubmitted(){
   clearTimeout(doneTimer);
   if (!DONE.length || $('doneCard').hidden) return;
   let jobs;
-  try { jobs = await api('/api/jobs'); } catch (e) { doneTimer = setTimeout(watchSubmitted, 5000); return; }
+  try { jobs = await api('/api/jobs'); } catch (e) {
+    if (SUBMITTING && Date.now() > SUBMITTING.until) busy(null);
+    doneTimer = setTimeout(watchSubmitted, 5000); return; }
   const ids = new Set(DONE.map(c => c.id)), mine = jobs.filter(j => ids.has(j.sweep_id));
   const sent = mine.filter(j => j.uuid).length, failed = mine.filter(j => j.status === 'SUBMIT_FAILED').length;
   const waiting = mine.filter(j => j.status === 'NOT_SUBMITTED').length;
@@ -1408,6 +1441,16 @@ async function watchSubmitted(){
       <td><button class="rowbtn" data-sweep="${esc(c.id)}" type="button">Jobs &rarr;</button></td></tr>`).join('');
   $('doneTable').querySelectorAll('[data-sweep]').forEach(b => b.addEventListener('click', () => { FSET.sweep = b.dataset.sweep; show('jobs'); }));
   if (failed && !watchSubmitted.warned) { watchSubmitted.warned = true; toast(`TAPIS refused ${failed} job${failed === 1 ? '' : 's'}; the reason is in the table.`); }
+  // unlock once every job is in TAPIS (or refused); jobs held back by a queue's job limit go later, so also
+  // unlock when nothing has changed for two checks after the first job got through, or after 45 s
+  if (SUBMITTING) {
+    const settled = mine.length && mine.every(j => j.uuid || j.status === 'SUBMIT_FAILED' || j.status === 'CANCELLED');
+    const sig = mine.map(j => j.status + (j.uuid || '')).join();
+    SUBMITTING.same = sig === SUBMITTING.last ? SUBMITTING.same + 1 : 0; SUBMITTING.last = sig;
+    if (settled || (sent + failed > 0 && SUBMITTING.same >= 2) || Date.now() > SUBMITTING.until) {
+      busy(null); toast(`${sent} of ${mine.length} TAPIS job${mine.length === 1 ? '' : 's'} submitted` + (failed ? `, ${failed} refused` : '') + '.');
+    }
+  }
   // keep watching until no job is still on its way into TAPIS
   if (mine.some(j => !j.uuid && j.status !== 'SUBMIT_FAILED' && j.status !== 'CANCELLED') || !mine.length) doneTimer = setTimeout(watchSubmitted, 3000);
 }
