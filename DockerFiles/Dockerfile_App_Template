@@ -1,0 +1,16 @@
+FROM <web-accessible-path-to-image-hub>/harp-framework-local:2.0.0
+
+# 1. add application required installations.
+
+
+# 2. Target application setup 
+# Set the APP_PATH to location with your application work folder (taget application to be profiled) and APP_NAME to the work folder name
+ENV APP_PATH="<path-to-target-application>/<target-application-work-folder>"
+ENV APP_NAME="<target-application-work-folder>"
+
+# Add the target application work folder to the image
+ADD $APP_PATH /app/$APP_PATH
+
+# 3. copy the execution end-point file and set it
+COPY DockerFiles/ProfileApplication.sh /app/ProfileApplication.sh
+ENTRYPOINT ["sh", "/app/ProfileApplication.sh"]

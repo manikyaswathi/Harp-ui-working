@@ -1,0 +1,17 @@
+# FROM swathimanikya/harp-framework-local:2.0.0
+FROM swathimanikya/harp-framework-ci:2.0.0
+
+
+# 1. add application required installations.
+# None for Euler Number
+
+# 2. Target application setup 
+# ENV APP_NAME="01-eulers_number"
+ENV APP_PATH="../examples/01-eulers_number"
+ENV APP_NAME="01-eulers_number"
+ADD $APP_PATH /app/$APP_NAME
+# Replace examples with your application folder
+
+# 3. copy the exection end-point file and set it
+COPY DockerFiles/ProfileApplication.sh /app/ProfileApplication.sh
+ENTRYPOINT ["sh", "/app/ProfileApplication.sh"]

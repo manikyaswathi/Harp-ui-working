@@ -1,0 +1,29 @@
+PIPELINE_HOME_VAR = "PIPELINE_HOME"
+APP_HOME="APP_HOME"
+HARP_STORE="HARP_STORE"
+TARGET_APP="TARGET_APP"
+
+
+
+TRAIN_DATASET_FOLDER_NAME = "train"
+MODELS_FOLDER_NAME = "models"
+DATASET_FILE_NAME = "full_dataset.csv"
+DATASET_PCA_FILE_NAME = "full_dataset_pca.csv"
+
+HARP_STORE = "HARP_STORE"
+APPLICATION_FOLDER_NAME = "applications"
+
+APPLICATION_CONFIG_FILE_NAME = "config.json"
+
+MODEL_COMMONS_FILE_NAME = "model_commons.csv"
+
+LINEAR_REGRESSION_MODEL_NAME = "lr_model_datetime.pkl"
+DNN_MODEL_NAME = "dnn_model_datetime.hdf5"
+DECISION_TREE_REGRESSOR_MODEL_NAME = "dtr_model_datetime.pkl"
+
+
+LOSS_FUNCTION = "MSE"
+SAMPLING_BIAS = "upsample"
+
+
+

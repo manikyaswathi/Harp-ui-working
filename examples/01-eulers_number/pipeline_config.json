@@ -1,0 +1,29 @@
+{
+    "application": "euler",
+    "application_category": "basic",
+    "cheetah_app_directory": "01-eulers_number",
+    "modules_to_run": ["generate", "build", "predict"],
+    "runs":
+    [
+    {   "type": "SD",
+        "wait_time": 5,
+        "paths": {
+        "cheetah_campaign_name": "pipeline_campaign_euler_SD_002",
+        "cheetah_campaign_file": "cheetah_campaign_SD.py" }
+    },
+    {   "type": "FS",
+        "wait_time": 5,
+        "paths": {
+        "cheetah_campaign_name": "pipeline_campaign_euler_FS_002",
+        "cheetah_campaign_file": "cheetah_campaign_FS.py" }
+    },
+    {   "type": "test_data",
+        "wait_time": 5,
+        "paths": {
+        "cheetah_campaign_name": "pipeline_campaign_euler_test_002",
+        "cheetah_campaign_file": "cheetah_campaign_test.py"}
+    }
+    ],
+    "cheetah_campaign_machine": "local",
+    "project_account": "NA"
+}

@@ -1,0 +1,31 @@
+FROM python:3.10
+
+# Set environment variables
+ENV PIP_DISABLE_PIP_VERSION_CHECK=on
+
+#  "1. Installing HARP Pipeline Dependencies"
+RUN pip3 install psutil
+RUN pip3 install pandas
+RUN pip3 install scikit-learn
+RUN apt-get update 
+RUN apt-get install -y jq
+RUN pip3 install tensorflow
+#  "1.0. DONE HARP Pipeline Dependency configurations"
+
+# "2. Copying HARP"
+# "2.0 Copying HARP components"
+ADD cheetah /app/HARP/cheetah
+ADD pipeline /app/HARP/pipeline
+ADD Post_Execution_Scripts /app/HARP/Post_Execution_Scripts
+#  "2.1 Installing Cheetah"
+RUN pip3 install --editable /app/HARP/cheetah/.
+# "2.2 DONE cheetah is configured"
+
+
+ENV HARP_HOME="/app/HARP"
+ENV PATH=$PATH:"$HARP_HOME/pipeline/bin/local/"
+
+
+# Only use these for localbox testing
+ENV SCRATCH="/scratch"
+ENV USER="HARP_user"

@@ -1,0 +1,62 @@
+{
+"description": "Pitzer cluster of Ohio Supercomputer center",
+"systemType": "LINUX",
+"host": "pitzer.osc.edu",
+"id": "$system_id_hpc",
+"enabled": "True",
+"effectiveUserId": "$effective_user_id",
+"defaultAuthnMethod": "PKI_KEYS",
+"rootDir": "/",
+"port": 22,
+"useProxy": "False",
+"canExec": "True",
+"mpiCmd": "string",
+"jobRuntimes": [ { "runtimeType": "SINGULARITY" } ],
+"jobWorkingDir": "$job_working_dir",
+"jobMaxJobs": 12000,
+"jobMaxJobsPerUser": -1,
+"canRunBatch": "True",
+"batchScheduler": "SLURM",
+"batchDefaultLogicalQueue": "$queue_name",
+"batchLogicalQueues": [
+	{
+		"name": "serial",
+		"hpcQueueName": "serial",
+		"maxJobsPerUser": 1,
+		"minNodeCount": 1,
+		"maxNodeCount": 1,
+		"minCoresPerNode": 1,
+		"maxCoresPerNode": 40,
+		"minMemoryMB": 1,
+		"maxMemoryMB": 160000,
+		"minMinutes": 1,
+		"maxMinutes": 10080
+	},
+	{
+		"name": "parallel",
+		"hpcQueueName": "parallel",
+		"maxJobsPerUser": 1,
+		"minNodeCount": 2,
+		"maxNodeCount": 81,
+		"minCoresPerNode": 1,
+		"maxCoresPerNode": 40,
+		"minMemoryMB": 1,
+		"maxMemoryMB": 160000,
+		"minMinutes": 1,
+		"maxMinutes": 5760
+	},
+	{
+		"name": "gpuserial-40core",
+		"hpcQueueName": "gpuserial-40core",
+		"maxJobsPerUser": 1,
+		"minNodeCount": 0,
+		"maxNodeCount": 1,
+		"minCoresPerNode": 1,
+		"maxCoresPerNode": 40,
+		"minMemoryMB": 1,
+		"maxMemoryMB": 160000,
+		"minMinutes": 1,
+		"maxMinutes": 5760
+	}
+	]
+}

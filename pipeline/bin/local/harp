@@ -1,0 +1,111 @@
+#!/usr/bin/bash
+
+export PIPELINE_HOME=$HARP_HOME/pipeline
+
+application=$(cat $1 | jq '.application' | tr -d '"')
+application_category=$(cat $1 | jq '.application_category' | tr -d '"')
+cheetah_app_directory=$(cat $1 | jq '.cheetah_app_directory' | tr -d '"')
+cheetah_campaign_machine=$(cat $1 | jq '.cheetah_campaign_machine' | tr -d '"')
+runs=$(cat $1 | jq '.runs' | tr -d '"')
+
+# Modules of framework to run
+cheetah_campaign_machine=$(cat $1 | jq '.cheetah_campaign_machine' | tr -d '"')
+
+echo "PIPELINE_CONFIG: $1"
+echo "APPLICATION: $application"
+echo "APPLICATION_CATEGORY: $application_category"
+echo "CHEETAH_APP_DIRECTORY: $cheetah_app_directory"
+echo "CHEETAH_CAMPAIGN_MACHINE: $cheetah_campaign_machine"
+
+
+# MODULES TO RUN
+modules_to_run=()
+for m in $(jq '.modules_to_run | keys | .[]' $1); do
+    mod=$(jq -r ".modules_to_run[$m]" $1);
+    modules_to_run+=( $mod )
+done
+for str in ${modules_to_run[@]}; do
+    if [ "generate" == "$str" ]
+    then
+        echo "************************************************************************************"
+        echo "In Generating and Preparing Training Data Phase"
+        echo "------------------------------------------------------------------------------------"
+        list_training_data=()
+        #STEP A-1:
+        echo "Executing the runs SD, FS and test data from the campaign files"
+        for r in $(jq '.runs | keys | .[]' $1); do
+            run=$(jq -r ".runs[$r]" $1);
+            type=$(jq -r '.type' <<< "$run");
+            cheetah_campaign_name=$(jq -r '.paths.cheetah_campaign_name' <<< "$run");
+            cheetah_campaign_file=$(jq -r '.paths.cheetah_campaign_file' <<< "$run");
+            wait_time=$(jq -r '.wait_time' <<< "$run");
+            echo "------------------------------------------------------------------------------"
+            echo "Type os Training Executions: $type"
+            echo "Cheetah Campaign Name: $cheetah_campaign_name"
+            echo "Cheetah Campaign File $cheetah_campaign_file"
+            echo "  $r. Configuration batch in folder $cheetah_campaign_name with type $type"
+            echo "------------------------------------------------------------------------------"
+            echo "  STEP 1: Setting the current configuration folder"
+            cheetah create-campaign -a $cheetah_app_directory -o $cheetah_campaign_name -e $cheetah_campaign_file -m $cheetah_campaign_machine
+            mkdir $cheetah_campaign_name/$USER/sg_1_Details
+            echo type > $cheetah_campaign_name/$USER/sg_1_Details/readme.csv
+            echo $type >> $cheetah_campaign_name/$USER/sg_1_Details/readme.csv
+            echo "  STEP 2: Executing the current configuration"
+            ./$cheetah_campaign_name/$USER/run-all.sh
+            echo "  STEP 3: Checking status of runs in current configuration"
+            echo "  <BEGIN> Starting to generate training data by executing runs "
+            echo "      <WAITING> Prints update every $wait_time secs"
+            status=$(cheetah status -s $cheetah_campaign_name)
+            while [[ "$status" != *"DONE"* ]]; do 
+                sleep $wait_time;
+                status=$(cheetah status -s $cheetah_campaign_name);
+                echo "      generating training data by executing runs ..."
+            done
+            echo "  <END> Done generating training data by executing runs "
+            echo "  STEP 4: Scraping the folder structure  in current configuration"
+            head -n1 $cheetah_campaign_name/$USER/sg_1_Details/codar.post.details.run-0.iteration-0.csv > $cheetah_campaign_name/$USER/$cheetah_campaign_name.csv
+            tail -q -n+2 $cheetah_campaign_name/$USER/sg_1_Details/codar.post.details.* >> $cheetah_campaign_name/$USER/$cheetah_campaign_name.csv
+        
+            list_training_data+=( $cheetah_campaign_name/$USER/$cheetah_campaign_name.csv )
+        done
+        echo "Done Generating Training data"
+
+        #STEP A-2:
+        python3 ScrapeCSV.py $application ${list_training_data[@]}
+        
+        # run data Scrapper - TODO for incremental add on
+        python3 $PIPELINE_HOME/modules/pipeline.py --module data_scraper --config $1
+        echo "************************************************************************************"
+    fi
+    if [ "test" == "$str" ]
+    then
+        # STEP 00
+        echo "I AM TESTING"
+    fi
+    if [ "build" == "$str" ]
+    then
+        echo "************************************************************************************"
+        echo "In Building Regression Models Phase"
+        echo "------------------------------------------------------------------------------------"
+        # STEP B-0
+        # run data preprocessor 
+        python3 $PIPELINE_HOME/modules/pipeline.py --module data_preprocessor --config $1
+        # STEP B-1
+        # run model trainer, let this read metadata and decide on making a new model.
+        python3 $PIPELINE_HOME/modules/pipeline.py --module model_trainer --config $1
+        echo "************************************************************************************"
+    fi
+    if [ "predict" == "$str" ]
+    then
+        echo "************************************************************************************"
+        echo "In Selecting Appropriate Prediction Model Phase"
+        echo "------------------------------------------------------------------------------------"
+        # STEP C
+        # Run predictor
+        echo "I AM IN PREDICT"
+        python3 $PIPELINE_HOME/modules/pipeline.py --module predictor --config $1
+        echo "************************************************************************************"
+    fi
+done
+
+echo "DONE EXECUTING THE PIPELINE"
