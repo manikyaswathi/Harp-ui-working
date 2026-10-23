@@ -4,8 +4,13 @@ module, using the TAPIS Systems, Files, Apps and Jobs services. The server
 never touches cluster file systems directly.
 """
 
+import logging
 import threading
 import time
+
+from .log import log, short
+
+QUIET = {"jobs.getJobStatus", "jobs.getJob", "files.getContents", "files.getTransferTask"}
 
 TERMINAL_STATUSES = {"FINISHED", "FAILED", "CANCELLED"}
 
@@ -86,11 +91,13 @@ class TapisGateway:
             if access_token:
                 client = Tapis(base_url=base_url, access_token=access_token)
                 username = _get(client.authenticator.get_userinfo(), "username")
+                log.info("TAPIS login ok: %s on %s", username, base_url)
             else:
                 client = Tapis(base_url=base_url, username=username, password=password)
                 client.get_tokens()
         except Exception as e:
             msg = str(e).replace(password, "***") if password else str(e)
+            log.warning("TAPIS login FAILED on %s: %s", base_url, short(msg, 600))
             raise TapisError(f"TAPIS login failed: {msg}") from None
         finally:
             password = None
@@ -101,12 +108,22 @@ class TapisGateway:
 
     def _call(self, fn, *args, **kwargs):
         # tapipy refreshes expiring tokens itself; we only serialize calls and
-        # turn its many exception types into one.
+        # turn its many exception types into one. Every call is logged.
+        name = ".".join(x for x in (getattr(fn, "resource_name", None), getattr(fn, "operation_id", None)) if x) \
+            or getattr(fn, "__name__", None) or "call"
+        what = " ".join(f"{k}={short(v)}" for k, v in kwargs.items()
+                        if k not in ("appArgs", "parameterSet", "fileInputs", "elements"))
+        start = time.time()
         with self._lock:
             try:
-                return fn(*args, **kwargs)
+                out = fn(*args, **kwargs)
             except Exception as e:
+                log.warning("TAPIS %s %s -> FAILED after %.1fs: %s (user %s)", name, what, time.time() - start,
+                            short(e, 600), self.username)
                 raise TapisError(str(e)) from e
+        # the poller's routine reads would flood the log; their failures and status changes are still logged
+        log.log(logging.DEBUG if name in QUIET else logging.INFO, "TAPIS %s %s -> ok %.1fs", name, what, time.time() - start)
+        return out
 
     # ----------------------------------------------------------------- systems
     def list_systems(self):
@@ -181,8 +198,12 @@ class TapisGateway:
 
     # -------------------------------------------------------------------- jobs
     def submit_job(self, request: dict) -> str:
+        log.debug("TAPIS job request: %s", request)
         job = self._call(self.client.jobs.submitJob, **request)
-        return _get(job, "uuid")
+        uuid = _get(job, "uuid")
+        log.info("TAPIS accepted job %s on %s/%s -> %s", request.get("name"), request.get("execSystemId"),
+                 request.get("execSystemLogicalQueue") or "default queue", uuid)
+        return uuid
 
     def job_status(self, uuid) -> str:
         return _get(self._call(self.client.jobs.getJobStatus, jobUuid=uuid), "status")

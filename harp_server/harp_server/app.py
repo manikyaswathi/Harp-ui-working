@@ -7,7 +7,6 @@ Run with HTTPS:  python3 -m harp_server.serve   (see README for certificates)
 
 import csv
 import io
-import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -21,6 +20,7 @@ from .build import MODELS, TRAINING_SETS, BuildManager, build_view, standardize,
 from .plan import build_plan, harp_app, is_gpu, resolve_target
 from .sweep import SpecError
 from .tapis_gateway import TapisError, TapisGateway
+from .log import log, setup as setup_log
 
 # The profiling page lives at the repository root.
 PROFILING_PAGE = os.environ.get(
@@ -107,11 +107,14 @@ def create_app(data_dir=None, poll_interval=None, login=TapisGateway.login, star
         manager.stop()
 
     app = FastAPI(title="HARP sweep server", lifespan=lifespan)
+    setup_log(data_dir)
+    log.info("HARP server starting: tenant %s, data in %s, log file %s", tapis_base_url, data_dir,
+             os.path.join(data_dir, "harp_server.log"))
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, exc: Exception):
         # a bug, not a refusal: log the traceback and still tell the page what broke
-        logging.getLogger("harp_server").exception("%s %s failed", request.method, request.url.path)
+        log.exception("%s %s failed with a server error", request.method, request.url.path)
         return JSONResponse({"detail": f"HARP server error ({type(exc).__name__}): {exc}"}, status_code=500)
     app.state.manager = manager
     app.state.builds = builds
@@ -250,25 +253,38 @@ def create_app(data_dir=None, poll_interval=None, login=TapisGateway.login, star
     @app.post("/api/plan/submit")
     def submit_plan(plan: dict = Body(...), gw: TapisGateway = Depends(gateway)):
         """Launch every sweep of the plan. Nothing is submitted unless every sweep is valid."""
+        log.info("submit from %s: %d sweep(s)", owner_of(gw), len(plan.get("sweeps") or []) if isinstance(plan, dict) else 0)
         built, storage_error = plan_or_400(plan, gw)
         if storage_error:
+            log.warning("submit refused: %s", storage_error)
             raise HTTPException(400, storage_error)
         for x in map(checked, built):
             if not x["ok"]:
+                log.warning("submit refused: sweep %s: %s", x["name"], x["error"])
                 raise HTTPException(400, f"sweep {x['name']}: {x['error']}")
-        created = []
+        made = []
         for b in built:
             try:
-                created.append(campaign_view(manager.create(b["spec"], gw), include_jobs=False))
+                made.append(manager.create(b["spec"], gw))
             except TapisError as e:
-                if created:
-                    manager.kick()
+                for c in made:          # sweeps already created still go out
+                    manager.submit_now(c, gw)
                 raise HTTPException(502, f"TAPIS refused sweep {b['name']}"
-                                         + (f" after {len(created)} were submitted" if created else
+                                         + (f" after {len(made)} were submitted" if made else
                                             " (could not create its results folder; check the path and your "
                                             "write permission on that system)") + f": {e}")
-        manager.kick()
-        return created
+        out = []
+        for c in made:      # answer only once TAPIS has answered for each job it can take now
+            manager.submit_now(c, gw)
+            view = campaign_view(c, include_jobs=False)
+            view["jobs"] = [{"name": j["name"], "system_id": j["system_id"], "status": j["status"],
+                             "uuid": j["uuid"], "error": j["error"]} for j in c["jobs"]]
+            out.append(view)
+            log.info("sweep %s (%s): %d of %d jobs in TAPIS, %d refused, %d waiting for a free slot", c["spec"]["name"],
+                     c["id"], sum(1 for j in c["jobs"] if j["uuid"]), len(c["jobs"]),
+                     sum(1 for j in c["jobs"] if j["status"] == "SUBMIT_FAILED"),
+                     sum(1 for j in c["jobs"] if j["status"] == "NOT_SUBMITTED"))
+        return out
 
     @app.get("/api/jobs")
     def all_jobs(gw: TapisGateway = Depends(gateway)):

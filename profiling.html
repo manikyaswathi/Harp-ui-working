@@ -1368,7 +1368,7 @@ async function renderReview(){
     CHECK = res.sweeps;
     const cell = k => $('reviewTable').querySelector(`[data-t="${k}"]`);
     CHECK.forEach((r, i) => { const id = PLAN[i].id, td = $('reviewTable').querySelector(`.chk[data-plan="${id}"]`);
-      if (td) td.innerHTML = r.ok ? '<span class="st done">ready</span>' : `<span class="st bad" title="${esc(r.error)}">fix</span>`;
+      if (td) td.innerHTML = r.ok ? '<span class="st done" title="Passes HARP\'s checks: parameters, and cores / memory / time within this queue\'s TAPIS limits. TAPIS itself answers only when you submit.">checks passed</span>' : `<span class="st bad" title="${esc(r.error)}">fix</span>`;
       (r.targets || []).forEach((t, j) => {   // what each job will really ask TAPIS for
         const set = (f, v) => { const el = cell(`${id}:${j}:${f}`); if (el) el.textContent = v; };
         set('c', t.cores_per_node); set('m', fmtMem(t.memory_mb)); set('t', fmtMin(t.max_minutes)); }); });
@@ -1392,18 +1392,18 @@ function reviewReady(){
 ['store', 'storeSys', 'moveSys', 'movePath'].forEach(id => $(id).addEventListener('input', reviewReady));
 $('confirm').addEventListener('change', reviewReady);
 /* While a plan is being submitted the page is locked: no tab changes, no second submit, no leaving. */
-let SUBMITTING = null;
 const leaveGuard = e => { e.preventDefault(); e.returnValue = ''; };
 function busy(title, sub){
   const on = !!title; $('busy').hidden = !on;
   if (on) { $('busyTitle').textContent = title; $('busySub').textContent = sub || ''; }
   if (on) window.addEventListener('beforeunload', leaveGuard); else window.removeEventListener('beforeunload', leaveGuard);
-  if (!on) SUBMITTING = null;
 }
 $('submitBtn').addEventListener('click', async () => {
   const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'Submitting…';
-  SUBMITTING = {until: Date.now() + 45000, last: null, same: 0}; $('submitErr').hidden = true;
-  busy('Submitting to TAPIS…', 'Creating each sweep\'s results folder. Please stay on this page.');
+  $('submitErr').hidden = true;
+  const nJobs = PLAN.reduce((n, p) => n + planJobs(p), 0);
+  busy('Submitting to TAPIS…', `Creating each sweep's results folder and sending ${nJobs} job${nJobs === 1 ? '' : 's'} `
+       + 'to TAPIS. The page unlocks when TAPIS has answered. Please stay on this page.');
   store.set('harp-launch', {storeSys: $('storeSys').value, store: $('store').value.trim(),
                             moveSys: $('moveSys').value, movePath: $('movePath').value.trim()});
   const msg = $('submitMsg');
@@ -1424,9 +1424,12 @@ $('submitBtn').addEventListener('click', async () => {
   $('reviewTable').innerHTML = ''; $('reviewTotals').textContent = '';
   btn.textContent = 'Submit plan'; reviewReady();
   $('doneTitle').textContent = `Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}`;
-  toast(`Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}. Sending the jobs to TAPIS…`);
-  busy('Sending the jobs to TAPIS…', 'Waiting for TAPIS job ids. Please stay on this page.');
-  DONE = made; watchSubmitted.warned = false; watchSubmitted();
+  busy(null);
+  const all = made.flatMap(c => c.jobs || []), sent = all.filter(j => j.uuid).length,
+        refused = all.filter(j => j.status === 'SUBMIT_FAILED').length, waiting = all.filter(j => j.status === 'NOT_SUBMITTED').length;
+  toast(`TAPIS accepted ${sent} of ${all.length} job${all.length === 1 ? '' : 's'}` + (refused ? `, refused ${refused}` : '')
+        + (waiting ? `; ${waiting} wait for a free slot` : '') + '.');
+  DONE = made; watchSubmitted.warned = refused > 0; watchSubmitted();
   refreshBadge(); loadApps().then(renderApps).catch(() => {});
 });
 
@@ -1462,7 +1465,6 @@ async function watchSubmitted(){
   if (!DONE.length || $('doneCard').hidden) return;
   let jobs;
   try { jobs = await api('/api/jobs'); } catch (e) {
-    if (SUBMITTING && Date.now() > SUBMITTING.until) busy(null);
     doneTimer = setTimeout(watchSubmitted, 5000); return; }
   const ids = new Set(DONE.map(c => c.id)), mine = jobs.filter(j => ids.has(j.sweep_id));
   const sent = mine.filter(j => j.uuid).length, failed = mine.filter(j => j.status === 'SUBMIT_FAILED').length;
@@ -1480,16 +1482,6 @@ async function watchSubmitted(){
       <td><button class="rowbtn" data-sweep="${esc(c.id)}" type="button">Jobs &rarr;</button></td></tr>`).join('');
   $('doneTable').querySelectorAll('[data-sweep]').forEach(b => b.addEventListener('click', () => { FSET.sweep = b.dataset.sweep; show('jobs'); }));
   if (failed && !watchSubmitted.warned) { watchSubmitted.warned = true; toast(`TAPIS refused ${failed} job${failed === 1 ? '' : 's'}; the reason is in the table.`); }
-  // unlock once every job is in TAPIS (or refused); jobs held back by a queue's job limit go later, so also
-  // unlock when nothing has changed for two checks after the first job got through, or after 45 s
-  if (SUBMITTING) {
-    const settled = mine.length && mine.every(j => j.uuid || j.status === 'SUBMIT_FAILED' || j.status === 'CANCELLED');
-    const sig = mine.map(j => j.status + (j.uuid || '')).join();
-    SUBMITTING.same = sig === SUBMITTING.last ? SUBMITTING.same + 1 : 0; SUBMITTING.last = sig;
-    if (settled || (sent + failed > 0 && SUBMITTING.same >= 2) || Date.now() > SUBMITTING.until) {
-      busy(null); toast(`${sent} of ${mine.length} TAPIS job${mine.length === 1 ? '' : 's'} submitted` + (failed ? `, ${failed} refused` : '') + '.');
-    }
-  }
   // keep watching until no job is still on its way into TAPIS
   if (mine.some(j => !j.uuid && j.status !== 'SUBMIT_FAILED' && j.status !== 'CANCELLED') || !mine.length) doneTimer = setTimeout(watchSubmitted, 3000);
 }

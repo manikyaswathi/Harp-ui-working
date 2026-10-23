@@ -15,6 +15,7 @@ import uuid as uuidlib
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from .log import log
 from .sweep import plan_jobs, summarize, validate_spec
 from .tapis_gateway import TERMINAL_STATUSES, TapisError
 
@@ -216,9 +217,12 @@ class CampaignManager:
     def stop(self):
         self._stop.set()
 
-    def kick(self):
-        """Submit new campaigns' jobs now instead of at the next poll (the page waits for their TAPIS ids)."""
-        threading.Thread(target=self.tick, name="harp-kick", daemon=True).start()
+    def submit_now(self, campaign, gateway):
+        """Send a new campaign's jobs to TAPIS before answering the page, so the page shows TAPIS's
+        answer for each job (its id, or why it was refused). Jobs over a queue's job limit wait for the poller."""
+        with self._lock:
+            self._submit_jobs(campaign, gateway)
+            self.store.save(campaign)
 
     def _loop(self):
         while not self._stop.is_set():
@@ -290,6 +294,7 @@ class CampaignManager:
                     job["error"] = f"status check failed: {e}"
                     continue
                 if status != job["status"]:
+                    log.info("job %s (%s) on %s: %s -> %s", job["name"], job["uuid"], job["system_id"], job["status"], status)
                     job["status"] = status
                     if status in TERMINAL_STATUSES:
                         job["ended_at"] = _now()
@@ -394,6 +399,7 @@ class CampaignManager:
         self._event(campaign, f"{campaign['status']}: {result['rows']} profiling rows -> {result['csv_path']}")
 
     def _event(self, campaign, message):
+        log.info("sweep %s (%s): %s", campaign["spec"]["name"], campaign["id"], message)
         campaign["events"].append({"at": _now(), "message": message})
         del campaign["events"][:-200]
 

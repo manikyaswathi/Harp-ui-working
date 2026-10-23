@@ -80,6 +80,9 @@ which is the name the existing **build** phase looks for. Runs that fail go to
    - `HARP_ALLOW_HTTP=1`: accept logins over plain HTTP. Never use this on a shared server.
    - `HARP_SERVER_DATA`: where campaign state is kept. Default `~/.harp_server`.
    - `HARP_POLL_SECONDS`: how often the server polls TAPIS. Default `15`.
+   - `HARP_LOG_LEVEL`: `INFO` (default) logs logins, submits, every TAPIS call and its answer, and job status
+     changes to the terminal and to `<HARP_SERVER_DATA>/harp_server.log`; `DEBUG` adds the routine status polls
+     and the full TAPIS job requests. Tokens are never logged.
    - `HARP_TAPIS_BASE_URL`: tenant used for TapisUI token handoff. Default `https://icicleai.tapis.io`.
    - `HARP_PORTAL_ORIGINS`: exact comma-separated TapisUI origins allowed to frame HARP and hand off a token.
      When unset, framing remains disabled.
