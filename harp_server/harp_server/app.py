@@ -254,8 +254,13 @@ def create_app(data_dir=None, poll_interval=None, login=TapisGateway.login, star
             try:
                 created.append(campaign_view(manager.create(b["spec"], gw), include_jobs=False))
             except TapisError as e:
-                raise HTTPException(502, f"TAPIS refused sweep {b['name']} after "
-                                         f"{len(created)} were submitted: {e}")
+                if created:
+                    manager.kick()
+                raise HTTPException(502, f"TAPIS refused sweep {b['name']}"
+                                         + (f" after {len(created)} were submitted" if created else
+                                            " (could not create its results folder; check the path and your "
+                                            "write permission on that system)") + f": {e}")
+        manager.kick()
         return created
 
     @app.get("/api/jobs")

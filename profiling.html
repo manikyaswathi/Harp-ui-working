@@ -1364,23 +1364,53 @@ $('submitBtn').addEventListener('click', async () => {
   const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'Submitting…';
   store.set('harp-launch', {storeSys: $('storeSys').value, store: $('store').value.trim(),
                             moveSys: $('moveSys').value, movePath: $('movePath').value.trim()});
+  const msg = $('submitMsg');
+  msg.textContent = 'Writing each sweep\'s folder in TAPIS and queueing its jobs…';
+  let made;
   try {
-    const made = await api('/api/plan/submit', {method: 'POST', body: planBody()});
-    PLAN = []; savePlan(); $('confirm').checked = false;
-    $('submitCard').hidden = true; $('doneCard').hidden = false;
-    $('reviewTable').innerHTML = ''; $('reviewTotals').textContent = '';
-    $('doneTitle').textContent = `Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}`;
-    $('doneSub').textContent = `${made.reduce((n, c) => n + c.jobs_total, 0)} TAPIS jobs are on their way. Follow them on Jobs.`;
-    $('doneTable').innerHTML = `<tr><th>Sweep</th><th class="num">TAPIS jobs</th><th>Results folder</th><th></th></tr>` +
-      made.map(c => `<tr><td><b>${esc(c.name)}</b></td><td class="num">${c.jobs_total}</td>
-        <td class="uuid">${esc(c.storage.system_id)}:${esc(c.campaign_dir)}</td>
-        <td><button class="rowbtn" data-sweep="${esc(c.id)}" type="button">Jobs &rarr;</button></td></tr>`).join('');
-    $('doneTable').querySelectorAll('[data-sweep]').forEach(b => b.addEventListener('click', () => { FSET.sweep = b.dataset.sweep; show('jobs'); }));
-    refreshBadge(); loadApps().then(renderApps).catch(() => {});
+    made = await api('/api/plan/submit', {method: 'POST', body: planBody()});
   } catch (e) {
-    $('submitMsg').textContent = e.status === 401 ? 'Your session expired. Log in again, then submit.' : e.message;
-  } finally { btn.textContent = 'Submit plan'; reviewReady(); }
+    const why = e.status === 401 ? 'Your session expired. Log in again, then submit.' : e.message;
+    toast('Submit failed. Nothing was sent to TAPIS; see the message under the button.');
+    btn.textContent = 'Submit plan'; reviewReady(); msg.textContent = 'Not submitted: ' + why;
+    return;
+  }
+  PLAN = []; savePlan(); $('confirm').checked = false;
+  $('submitCard').hidden = true; $('doneCard').hidden = false;
+  $('reviewTable').innerHTML = ''; $('reviewTotals').textContent = '';
+  btn.textContent = 'Submit plan'; reviewReady();
+  $('doneTitle').textContent = `Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}`;
+  toast(`Submitted ${made.length} sweep${made.length === 1 ? '' : 's'}. Sending the jobs to TAPIS…`);
+  DONE = made; watchSubmitted.warned = false; watchSubmitted();
+  refreshBadge(); loadApps().then(renderApps).catch(() => {});
 });
+
+/* After a submit: each job of the new sweeps with its TAPIS job id as soon as TAPIS gives one. */
+let DONE = [], doneTimer = null;
+async function watchSubmitted(){
+  clearTimeout(doneTimer);
+  if (!DONE.length || $('doneCard').hidden) return;
+  let jobs;
+  try { jobs = await api('/api/jobs'); } catch (e) { doneTimer = setTimeout(watchSubmitted, 5000); return; }
+  const ids = new Set(DONE.map(c => c.id)), mine = jobs.filter(j => ids.has(j.sweep_id));
+  const sent = mine.filter(j => j.uuid).length, failed = mine.filter(j => j.status === 'SUBMIT_FAILED').length;
+  const waiting = mine.filter(j => j.status === 'NOT_SUBMITTED').length;
+  $('doneSub').textContent = `${sent} of ${mine.length} TAPIS job${mine.length === 1 ? '' : 's'} submitted`
+    + (failed ? ` · ${failed} refused by TAPIS` : '')
+    + (waiting ? ` · ${waiting} waiting (HARP sends them as the queue's job limit allows)` : '')
+    + '. Follow them on Jobs.';
+  $('doneTable').innerHTML = `<tr><th>Sweep</th><th>Job</th><th>System / queue</th><th>Status</th><th>TAPIS job id</th></tr>` +
+    mine.map(j => `<tr><td><b>${esc(j.sweep)}</b></td><td class="uuid">${esc(j.name)}</td>
+      <td>${esc(j.system_id)} / ${esc(j.queue || '')}</td>
+      <td>${pill(JOB_ST, j.status)}${j.error ? `<div class="err">${esc(j.error)}</div>` : ''}</td>
+      <td class="uuid">${j.uuid ? esc(j.uuid) : '–'}</td></tr>`).join('') +
+    DONE.map(c => `<tr><td colspan="4" class="uuid">Results: ${esc(c.storage.system_id)}:${esc(c.campaign_dir)}</td>
+      <td><button class="rowbtn" data-sweep="${esc(c.id)}" type="button">Jobs &rarr;</button></td></tr>`).join('');
+  $('doneTable').querySelectorAll('[data-sweep]').forEach(b => b.addEventListener('click', () => { FSET.sweep = b.dataset.sweep; show('jobs'); }));
+  if (failed && !watchSubmitted.warned) { watchSubmitted.warned = true; toast(`TAPIS refused ${failed} job${failed === 1 ? '' : 's'}; the reason is in the table.`); }
+  // keep watching until no job is still on its way into TAPIS
+  if (mine.some(j => !j.uuid && j.status !== 'SUBMIT_FAILED' && j.status !== 'CANCELLED') || !mine.length) doneTimer = setTimeout(watchSubmitted, 3000);
+}
 
 /* ================================================================ 3. jobs */
 const SWEEP_ST = {DONE:['done','done'], DONE_WITH_ERRORS:['warn','done with errors'], RUNNING:['run','running'],

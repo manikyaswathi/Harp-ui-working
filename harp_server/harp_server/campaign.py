@@ -216,6 +216,10 @@ class CampaignManager:
     def stop(self):
         self._stop.set()
 
+    def kick(self):
+        """Submit new campaigns' jobs now instead of at the next poll (the page waits for their TAPIS ids)."""
+        threading.Thread(target=self.tick, name="harp-kick", daemon=True).start()
+
     def _loop(self):
         while not self._stop.is_set():
             self.tick()
